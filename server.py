@@ -1,37 +1,29 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, send_file, jsonify
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "/opt/render/project/wav_files"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+FILEPATH = os.path.join(UPLOAD_FOLDER, "last.wav")
 
 @app.route("/recognize", methods=["POST"])
 def recognize():
-    try:
-        # принимаем бинарное тело
-        audio_data = request.data
-        if not audio_data or len(audio_data) < 100:
-            return jsonify({"error": "No or too small file"}), 400
+    audio_data = request.data
+    if not audio_data or len(audio_data) < 100:
+        return jsonify({"error": "No or too small file"}), 400
 
-        filepath = os.path.join(UPLOAD_FOLDER, "last.wav")
-        with open(filepath, "wb") as f:
-            f.write(audio_data)
+    with open(FILEPATH, "wb") as f:
+        f.write(audio_data)
 
-        return jsonify({
-            "status": "saved",
-            "bytes_received": len(audio_data),
-            "file": "last.wav"
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    print(f"Saved {len(audio_data)} bytes to {FILEPATH}")
+    return jsonify({"status": "saved", "bytes_received": len(audio_data)})
 
 @app.route("/last", methods=["GET"])
 def get_last():
-    filepath = os.path.join(UPLOAD_FOLDER, "last.wav")
-    if not os.path.exists(filepath):
+    if not os.path.exists(FILEPATH):
         return jsonify({"error": "No file yet"}), 404
-    return app.send_static_file(filepath)
+    return send_file(FILEPATH, mimetype="audio/wav", as_attachment=True)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
