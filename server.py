@@ -1,78 +1,65 @@
-from flask import Flask, request, jsonify, send_file
-import os
-import time
-import struct
+from flask import Flask, request, jsonify
+import os, struct
 
 app = Flask(__name__)
-
-AUDIO_DIR = "recordings"
-if not os.path.exists(AUDIO_DIR):
-    os.makedirs(AUDIO_DIR)
+UPLOAD_FOLDER = "recordings"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 audio_buffer = bytearray()
-record_counter = 0
 
-SAMPLE_RATE = 16000
-NUM_CHANNELS = 1
-BITS_PER_SAMPLE = 16
-
-def write_wav_header(filename, pcm_size):
+def write_wav_header(filename, pcm_size, sample_rate=16000, num_channels=1, bits_per_sample=16):
     with open(filename, "wb") as f:
-        # RIFF header
         f.write(b'RIFF')
-        f.write(struct.pack('<I', 36 + pcm_size))
+        f.write(struct.pack('<I', 36 + pcm_size))  # Размер всего файла минус 8
         f.write(b'WAVE')
-        # fmt subchunk
         f.write(b'fmt ')
-        f.write(struct.pack('<I', 16))          # Subchunk1Size
-        f.write(struct.pack('<H', 1))           # PCM format
-        f.write(struct.pack('<H', NUM_CHANNELS))
-        f.write(struct.pack('<I', SAMPLE_RATE))
-        byte_rate = SAMPLE_RATE * NUM_CHANNELS * BITS_PER_SAMPLE // 8
-        f.write(struct.pack('<I', byte_rate))
-        block_align = NUM_CHANNELS * BITS_PER_SAMPLE // 8
-        f.write(struct.pack('<H', block_align))
-        f.write(struct.pack('<H', BITS_PER_SAMPLE))
-        # data subchunk
+        f.write(struct.pack('<I', 16))             # Subchunk1Size
+        f.write(struct.pack('<H', 1))              # PCM
+        f.write(struct.pack('<H', num_channels))   # Channels
+        f.write(struct.pack('<I', sample_rate))    # Sample rate
+        byte_rate = sample_rate * num_channels * bits_per_sample // 8
+        f.write(struct.pack('<I', byte_rate))      # Byte rate
+        block_align = num_channels * bits_per_sample // 8
+        f.write(struct.pack('<H', block_align))    # Block align
+        f.write(struct.pack('<H', bits_per_sample))# Bits per sample
         f.write(b'data')
-        f.write(struct.pack('<I', pcm_size))
+        f.write(struct.pack('<I', pcm_size))       # Data chunk size
 
-@app.route("/recognize", methods=["POST"])
-def recognize():
+
+@app.route("/stream", methods=["POST"])
+def stream():
     global audio_buffer
-    if request.content_type != "audio/wav":
-        return jsonify({"error": "Invalid content type"}), 400
-
     chunk = request.data
-    if len(chunk) == 0:
-        return jsonify({"error": "No audio data"}), 400
+    if not chunk:
+        return jsonify({"error": "empty chunk"}), 400
 
     audio_buffer.extend(chunk)
     return jsonify({"status": "chunk received", "chunk_bytes": len(chunk)})
 
-@app.route("/recognize/flush", methods=["POST"])
+
+@app.route("/flush", methods=["POST"])
 def flush():
-    global audio_buffer, record_counter
+    global audio_buffer
+    pcm_size = len(audio_buffer)
 
-    if len(audio_buffer) == 0:
-        return jsonify({"error": "No audio recorded"}), 400
+    if pcm_size < 3200:
+        audio_buffer = bytearray()
+        return jsonify({"error": "too short recording"}), 400
 
-    record_counter += 1
-    filename = os.path.join(AUDIO_DIR, f"recording_{record_counter}.wav")
-    write_wav_header(filename, len(audio_buffer))
+    filename = os.path.join(UPLOAD_FOLDER, "recording.wav")
+
+    # Заголовок + PCM
+    write_wav_header(filename, pcm_size)
     with open(filename, "ab") as f:
         f.write(audio_buffer)
 
-    size = len(audio_buffer)
     audio_buffer = bytearray()
-    return jsonify({"status": "saved", "filename": filename, "bytes_received": size})
+    return jsonify({
+        "status": "saved",
+        "bytes_received": pcm_size,
+        "filename": filename
+    })
 
-@app.route("/recordings/<name>", methods=["GET"])
-def download_file(name):
-    path = os.path.join(AUDIO_DIR, name)
-    if os.path.exists(path):
-        return send_file(path, as_attachment=True)
-    return jsonify({"error": "File not found"}), 404
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=10000)
