@@ -18,7 +18,8 @@ def recognize():
         return jsonify({"error": "No audio data"}), 400
 
     headers = {
-        "Authorization": f"Api-Key {YANDEX_API_KEY}"
+        "Authorization": f"Api-Key {YANDEX_API_KEY}",
+        "Content-Type": "audio/x-wav"
     }
 
     try:
@@ -31,3 +32,4 @@ def recognize():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
