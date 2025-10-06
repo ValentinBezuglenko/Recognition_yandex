@@ -1,33 +1,43 @@
-from flask import Flask, request, jsonify
-import os, struct
+import os
+import time
+from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__)
+
+# Папка для хранения записей
 UPLOAD_FOLDER = "recordings"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# Буфер для накопления аудио
 audio_buffer = bytearray()
 
-def write_wav_header(filename, pcm_size, sample_rate=16000, num_channels=1, bits_per_sample=16):
+
+def write_wav_header(filename, pcm_size, sample_rate=16000, bits_per_sample=16, channels=1):
+    """Записывает WAV-заголовок + резерв под данные"""
     with open(filename, "wb") as f:
-        f.write(b'RIFF')
-        f.write(struct.pack('<I', 36 + pcm_size))  # Размер всего файла минус 8
-        f.write(b'WAVE')
-        f.write(b'fmt ')
-        f.write(struct.pack('<I', 16))             # Subchunk1Size
-        f.write(struct.pack('<H', 1))              # PCM
-        f.write(struct.pack('<H', num_channels))   # Channels
-        f.write(struct.pack('<I', sample_rate))    # Sample rate
-        byte_rate = sample_rate * num_channels * bits_per_sample // 8
-        f.write(struct.pack('<I', byte_rate))      # Byte rate
-        block_align = num_channels * bits_per_sample // 8
-        f.write(struct.pack('<H', block_align))    # Block align
-        f.write(struct.pack('<H', bits_per_sample))# Bits per sample
-        f.write(b'data')
-        f.write(struct.pack('<I', pcm_size))       # Data chunk size
+        f.write(b"RIFF")
+        f.write((36 + pcm_size).to_bytes(4, "little"))
+        f.write(b"WAVE")
+
+        # fmt subchunk
+        f.write(b"fmt ")
+        f.write((16).to_bytes(4, "little"))  # Subchunk1Size
+        f.write((1).to_bytes(2, "little"))   # PCM format
+        f.write((channels).to_bytes(2, "little"))
+        f.write((sample_rate).to_bytes(4, "little"))
+        byte_rate = sample_rate * channels * bits_per_sample // 8
+        f.write((byte_rate).to_bytes(4, "little"))
+        block_align = channels * bits_per_sample // 8
+        f.write((block_align).to_bytes(2, "little"))
+        f.write((bits_per_sample).to_bytes(2, "little"))
+
+        # data subchunk
+        f.write(b"data")
+        f.write((pcm_size).to_bytes(4, "little"))
 
 
-@app.route("/stream", methods=["POST"])
-def stream():
+@app.route("/upload_chunk", methods=["POST"])
+def upload_chunk():
     global audio_buffer
     chunk = request.data
     if not chunk:
@@ -42,23 +52,39 @@ def flush():
     global audio_buffer
     pcm_size = len(audio_buffer)
 
-    if pcm_size < 3200:
+    if pcm_size < 1000:  # меньше 1000 байт — отбрасываем
         audio_buffer = bytearray()
         return jsonify({"error": "too short recording"}), 400
 
-    filename = os.path.join(UPLOAD_FOLDER, "recording.wav")
+    # уникальное имя по времени
+    filename = f"recording_{int(time.time())}.wav"
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
 
-    # Заголовок + PCM
-    write_wav_header(filename, pcm_size)
-    with open(filename, "ab") as f:
+    # Записываем WAV
+    write_wav_header(filepath, pcm_size)
+    with open(filepath, "ab") as f:
         f.write(audio_buffer)
 
+    # очищаем буфер
     audio_buffer = bytearray()
+
     return jsonify({
         "status": "saved",
         "bytes_received": pcm_size,
-        "filename": filename
+        "filename": filename,
+        "url": f"/recordings/{filename}"
     })
+
+
+@app.route("/recordings/<filename>")
+def serve_recording(filename):
+    """Отдаём wav файл по ссылке"""
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+
+@app.route("/")
+def index():
+    return "🎙️ Speech server is running"
 
 
 if __name__ == "__main__":
