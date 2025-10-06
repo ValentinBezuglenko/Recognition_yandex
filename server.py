@@ -1,13 +1,10 @@
 from flask import Flask, request, jsonify, send_file
-import os
-import time
-import struct
+import os, struct
 
 app = Flask(__name__)
 
 AUDIO_DIR = "recordings"
-if not os.path.exists(AUDIO_DIR):
-    os.makedirs(AUDIO_DIR)
+os.makedirs(AUDIO_DIR, exist_ok=True)
 
 audio_buffer = bytearray()
 record_counter = 0
@@ -18,14 +15,12 @@ BITS_PER_SAMPLE = 16
 
 def write_wav_header(filename, pcm_size):
     with open(filename, "wb") as f:
-        # RIFF header
         f.write(b'RIFF')
         f.write(struct.pack('<I', 36 + pcm_size))
         f.write(b'WAVE')
-        # fmt subchunk
         f.write(b'fmt ')
-        f.write(struct.pack('<I', 16))          # Subchunk1Size
-        f.write(struct.pack('<H', 1))           # PCM format
+        f.write(struct.pack('<I', 16))
+        f.write(struct.pack('<H', 1))
         f.write(struct.pack('<H', NUM_CHANNELS))
         f.write(struct.pack('<I', SAMPLE_RATE))
         byte_rate = SAMPLE_RATE * NUM_CHANNELS * BITS_PER_SAMPLE // 8
@@ -33,27 +28,21 @@ def write_wav_header(filename, pcm_size):
         block_align = NUM_CHANNELS * BITS_PER_SAMPLE // 8
         f.write(struct.pack('<H', block_align))
         f.write(struct.pack('<H', BITS_PER_SAMPLE))
-        # data subchunk
         f.write(b'data')
         f.write(struct.pack('<I', pcm_size))
 
 @app.route("/recognize", methods=["POST"])
 def recognize():
     global audio_buffer
-    if request.content_type != "audio/wav":
-        return jsonify({"error": "Invalid content type"}), 400
-
     chunk = request.data
     if len(chunk) == 0:
         return jsonify({"error": "No audio data"}), 400
-
     audio_buffer.extend(chunk)
     return jsonify({"status": "chunk received", "chunk_bytes": len(chunk)})
 
 @app.route("/recognize/flush", methods=["POST"])
 def flush():
     global audio_buffer, record_counter
-
     if len(audio_buffer) == 0:
         return jsonify({"error": "No audio recorded"}), 400
 
