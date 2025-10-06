@@ -4,8 +4,8 @@ import os
 
 app = Flask(__name__)
 
-# Яндекс API ключ хранится на сервере для безопасности
-YANDEX_API_KEY = os.environ.get("YANDEX_API_KEY")  # ставим через переменные окружения
+# Яндекс API ключ хранится на сервере через переменную окружения
+YANDEX_API_KEY = os.environ.get("YANDEX_API_KEY")
 YANDEX_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize?lang=ru-RU"
 
 @app.route("/recognize", methods=["POST"])
@@ -17,19 +17,21 @@ def recognize():
     if len(audio) == 0:
         return jsonify({"error": "No audio data"}), 400
 
-    headers = {
-        "Authorization": f"Api-Key {YANDEX_API_KEY}",
-        "Content-Type": "audio/x-wav"
-    }
-
     try:
-        response = requests.post(YANDEX_URL, headers=headers, data=audio)
+        # Отправляем на Яндекс как файл, чтобы избежать проблем с Content-Type
+        files = {
+            "file": ("audio.wav", audio, "audio/x-wav")
+        }
+        headers = {
+            "Authorization": f"Api-Key {YANDEX_API_KEY}"
+        }
+
+        response = requests.post(YANDEX_URL, headers=headers, files=files)
         response.raise_for_status()
-        result = response.json()  # Yandex возвращает JSON с текстом
-        return jsonify(result)
+        return jsonify(response.json())  # Возвращаем JSON от Яндекса
+
     except requests.exceptions.RequestException as e:
         return jsonify({"error": str(e)}), 502
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
