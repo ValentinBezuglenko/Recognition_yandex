@@ -1,31 +1,57 @@
-from flask import Flask, request, jsonify
-import requests
+from flask import Flask, request, jsonify, send_file
 import os
+import time
 
 app = Flask(__name__)
 
-YANDEX_API_KEY = os.environ.get("YANDEX_API_KEY")
-YANDEX_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize?lang=ru-RU"
+AUDIO_DIR = "recordings"
+if not os.path.exists(AUDIO_DIR):
+    os.makedirs(AUDIO_DIR)
+
+# Временный буфер
+audio_buffer = bytearray()
+record_counter = 0
+last_chunk_time = 0
+CHUNK_TIMEOUT = 2.0  # секунда без новых данных = запись закончена
 
 @app.route("/recognize", methods=["POST"])
 def recognize():
+    global audio_buffer, last_chunk_time
+
     if request.content_type != "audio/wav":
         return jsonify({"error": "Invalid content type"}), 400
 
-    audio = request.data
-    if len(audio) == 0:
+    chunk = request.data
+    if len(chunk) == 0:
         return jsonify({"error": "No audio data"}), 400
 
-    try:
-        files = {"file": ("audio.wav", audio, "audio/x-wav")}
-        headers = {"Authorization": f"Api-Key {YANDEX_API_KEY}"}
+    audio_buffer.extend(chunk)
+    last_chunk_time = time.time()
+    return jsonify({"status": "chunk received", "chunk_bytes": len(chunk)})
 
-        response = requests.post(YANDEX_URL, headers=headers, files=files)
-        response.raise_for_status()
-        return jsonify(response.json())
+@app.route("/recognize/flush", methods=["POST"])
+def flush():
+    global audio_buffer, record_counter
 
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 502
+    if len(audio_buffer) == 0:
+        return jsonify({"error": "No audio recorded"}), 400
+
+    record_counter += 1
+    filename = os.path.join(AUDIO_DIR, f"recording_{record_counter}.wav")
+    with open(filename, "wb") as f:
+        f.write(audio_buffer)
+
+    size = len(audio_buffer)
+    audio_buffer = bytearray()  # очищаем буфер после сохранения
+
+    return jsonify({"status": "saved", "filename": filename, "bytes_received": size})
+
+@app.route("/recordings/<name>", methods=["GET"])
+def download_file(name):
+    path = os.path.join(AUDIO_DIR, name)
+    if os.path.exists(path):
+        return send_file(path, as_attachment=True)
+    return jsonify({"error": "File not found"}), 404
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
