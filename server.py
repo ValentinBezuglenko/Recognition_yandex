@@ -18,17 +18,13 @@ def recognize():
         return jsonify({"error": "No audio data"}), 400
 
     try:
-        # Отправляем на Яндекс как файл, чтобы избежать проблем с Content-Type
-        files = {
-            "file": ("audio.wav", audio, "audio/x-wav")
-        }
-        headers = {
-            "Authorization": f"Api-Key {YANDEX_API_KEY}"
-        }
+        # Отправляем на Яндекс как файл через multipart/form-data
+        files = {"file": ("audio.wav", audio, "audio/x-wav")}
+        headers = {"Authorization": f"Api-Key {YANDEX_API_KEY}"}
 
         response = requests.post(YANDEX_URL, headers=headers, files=files)
         response.raise_for_status()
-        return jsonify(response.json())  # Возвращаем JSON от Яндекса
+        return jsonify(response.json())
 
     except requests.exceptions.RequestException as e:
         return jsonify({"error": str(e)}), 502
